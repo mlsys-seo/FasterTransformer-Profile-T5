@@ -87,7 +87,7 @@ public:
     ~FusedAttentionLayer();
 
     void
-    forward(TensorMap* output_tensors, TensorMap* input_tensors, const AttentionWeight<T>* attention_weights) override;
+    forward(TensorMap* output_tensors, TensorMap* input_tensors, const AttentionWeight<T>* attention_weights, const int max_seq_len=0) override;
 
     void invokeTrtAddQkvBias(size_t token_num, const AttentionWeight<T>* attention_weights);
     bool isValidSeqLen(const size_t seq_len) override;

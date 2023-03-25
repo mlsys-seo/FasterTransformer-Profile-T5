@@ -27,6 +27,7 @@
 #include "src/fastertransformer/kernels/reduce_kernel_utils.cuh"
 #include "src/fastertransformer/layers/attention_layers/DecoderCrossAttentionLayer.h"
 #include "src/fastertransformer/utils/cuda_type_utils.cuh"
+#include "src/fastertransformer/utils/nvtx_utils.h"
 
 namespace fastertransformer {
 
@@ -865,7 +866,8 @@ DecoderCrossAttentionLayer<T>::~DecoderCrossAttentionLayer()
 template<typename T>
 void DecoderCrossAttentionLayer<T>::forward(TensorMap*                output_tensors,
                                             TensorMap*                input_tensors,
-                                            const AttentionWeight<T>* attention_weights)
+                                            const AttentionWeight<T>* attention_weights,
+                                            const int max_seq_len)
 {
     // input tensors:
     //      attention_input [batch_size, d_model],
@@ -880,6 +882,7 @@ void DecoderCrossAttentionLayer<T>::forward(TensorMap*                output_ten
     //      key_mem_cache [batch_size, head_num, size_per_head // x, mem_max_seq_len, x], where x = 16 / sizeof(T)
     //      value_mem_cache [batch_size, head_num, mem_max_seq_len, size_per_head]
     //      cross_attentions [batch_size, head_num, max_decoder_seq_len, mem_max_seq_len] optional float*
+    PUSH_RANGE("Cross Attention");
     FT_LOG_DEBUG("%s", __PRETTY_FUNCTION__);
     allocateBuffer(input_tensors->at("input_query").shape[0], input_tensors->at("encoder_output").shape[1]);
 
@@ -899,6 +902,9 @@ void DecoderCrossAttentionLayer<T>::forward(TensorMap*                output_ten
 
     const int batch_size      = input_tensors->at("input_query").shape[0];
     const int mem_max_seq_len = encoder_output_tensor.shape[1];
+
+    const int kv_step = max_seq_len == 0 ? 1 : max_seq_len - 1;
+    
     cublas_wrapper_->Gemm(CUBLAS_OP_N,
                           CUBLAS_OP_N,
                           hidden_units_,  // n
@@ -911,7 +917,10 @@ void DecoderCrossAttentionLayer<T>::forward(TensorMap*                output_ten
                           q_buf_,
                           hidden_units_ /* n */);
 
-    if (step == 1) {
+    
+    // std::cout<<"step: "<<std::to_string(step)<<"  max_seq_len: "<<std::to_string(max_seq_len)<<"  kv_step: "<<std::to_string(kv_step)<<std::endl;
+    if (step == kv_step) {
+        PUSH_RANGE("KV");
         if (is_batch_major_cache_) {
             cublas_wrapper_->Gemm(CUBLAS_OP_N,
                                   CUBLAS_OP_N,
@@ -974,6 +983,7 @@ void DecoderCrossAttentionLayer<T>::forward(TensorMap*                output_ten
                                   value_mem_cache,
                                   hidden_units_);
         }
+        POP_RANGE;
     }
     sync_check_cuda_error();
 
@@ -1022,6 +1032,7 @@ void DecoderCrossAttentionLayer<T>::forward(TensorMap*                output_ten
     if (is_free_buffer_after_forward_ == true) {
         freeBuffer();
     }
+    POP_RANGE;
 }
 
 template class DecoderCrossAttentionLayer<float>;

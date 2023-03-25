@@ -88,7 +88,8 @@ TensorParallelDecoderCrossAttentionLayer<T>::TensorParallelDecoderCrossAttention
 template<typename T>
 void TensorParallelDecoderCrossAttentionLayer<T>::forward(TensorMap*                output_tensors,
                                                           TensorMap*                input_tensors,
-                                                          const AttentionWeight<T>* attention_weights)
+                                                          const AttentionWeight<T>* attention_weights,
+                                                          const int max_seq_len)
 {
     // input tensors:
     //      input_query [batch_size, hidden_dimension],
@@ -111,7 +112,7 @@ void TensorParallelDecoderCrossAttentionLayer<T>::forward(TensorMap*            
         use_custom_all_reduce_kernel = custom_all_reduce_comm_->swapInternalBuffer(&reduce_tensor, size);
     }
 
-    DecoderCrossAttentionLayer<T>::forward(output_tensors, input_tensors, attention_weights);
+    DecoderCrossAttentionLayer<T>::forward(output_tensors, input_tensors, attention_weights, max_seq_len);
 
     T* attention_out = output_tensors->getPtr<T>("hidden_features");
     if (tensor_para_.world_size_ > 1) {

@@ -120,7 +120,9 @@ public:
 
     void forward(std::vector<Tensor>*                         output_tensors,
                  const std::vector<Tensor>*                   input_tensors,
-                 const std::vector<T5DecoderLayerWeight<T>*>* decoder_layer_weights);
+                 const std::vector<T5DecoderLayerWeight<T>*>* decoder_layer_weights,
+                 const int                                    max_seq_len            = 0,
+                 const int                                    profile_iters          = 0);
 
     bool has_adapters() const
     {

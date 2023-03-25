@@ -20,6 +20,7 @@
 #include "src/fastertransformer/kernels/gpt_kernels.h"
 #include "src/fastertransformer/layers/beam_search_layers/BaseBeamSearchLayer.h"
 
+
 namespace fastertransformer {
 
 template<typename T>
@@ -102,7 +103,6 @@ void T5Decoding<T>::allocateBuffer(
     cum_log_probs_   = (float*)(allocator_->reMalloc(cum_log_probs_, sizeof(float) * batchxbeam, false));
     finished_buf_    = (bool*)(allocator_->reMalloc(finished_buf_, sizeof(bool) * batchxbeam, false));
     h_finished_buf_  = (bool*)realloc(h_finished_buf_, sizeof(bool) * batchxbeam);
-
     key_cache_ = (T*)(allocator_->reMalloc(key_cache_, sizeof(T) * (2 * self_cache_size + 2 * mem_cache_size), false));
     value_cache_     = key_cache_ + self_cache_size;
     key_mem_cache_   = value_cache_ + self_cache_size;
@@ -338,23 +338,10 @@ T5Decoding<T>::~T5Decoding()
 }
 
 template<typename T>
-void T5Decoding<T>::registerCallback(callback_sig* fn, void* ctx)
-{
-    token_generated_cb_  = fn;
-    token_generated_ctx_ = ctx;
-}
-
-template<typename T>
-void T5Decoding<T>::unRegisterCallback()
-{
-    token_generated_cb_  = nullptr;
-    token_generated_ctx_ = nullptr;
-}
-
-template<typename T>
 void T5Decoding<T>::forward(std::vector<Tensor>*       output_tensors,
                             const std::vector<Tensor>* input_tensors,
-                            const T5DecodingWeight<T>* decoding_weights)
+                            const T5DecodingWeight<T>* decoding_weights,
+                            const int                  profile_iters)
 {
     // input_tensors:
     //      encoder_output [batch_size, mem_max_seq_len, memory_hidden_dimension]
@@ -373,195 +360,26 @@ void T5Decoding<T>::forward(std::vector<Tensor>*       output_tensors,
 
     std::unordered_map<std::string, Tensor> output_tensors_map{{"output_ids", output_tensors->at(0)},
                                                                {"sequence_length", output_tensors->at(1)}};
-    forward(&output_tensors_map, &input_tensors_map, decoding_weights);
+    forward(&output_tensors_map, &input_tensors_map, decoding_weights, profile_iters);
 }
 
 template<typename T>
 void T5Decoding<T>::forward(std::unordered_map<std::string, Tensor>*       output_tensors,
                             const std::unordered_map<std::string, Tensor>* input_tensors,
-                            const T5DecodingWeight<T>*                     decoding_weights)
+                            const T5DecodingWeight<T>*                     decoding_weights,
+                            const int                                      profile_iters)
 {
     FT_LOG_DEBUG(__PRETTY_FUNCTION__);
     TensorMap input_map(*input_tensors);
     TensorMap output_map(*output_tensors);
-    forward(&output_map, &input_map, decoding_weights);
-}
-
-template<typename T>
-void T5Decoding<T>::setOutputTensors(TensorMap* output_tensors, TensorMap const* input_tensors)
-{
-    if (pipeline_para_.rank_ != pipeline_para_.world_size_ - 1) {
-        return;
-    }
-
-    auto const batch_size       = output_tensors->at("output_ids").shape[0];
-    auto const beam_width       = output_tensors->at("output_ids").shape[1];
-    auto const sequence_lengths = output_tensors->at("sequence_length").getPtr<int>();
-    auto const max_seq_len      = output_tensors->at("output_ids").shape[2];
-
-    if (beam_width > 1) {
-        if (using_beam_hyps) {
-            beam_hyps_.sequence_lengths_src = sequence_lengths;
-            beam_hyps_.parent_ids_src       = parent_ids_buf_;
-            beam_hyps_.output_ids_src       = output_ids_buf_;
-            beam_hyps_.log_probs_src        = output_log_probs_buf_;
-            beam_hyps_.max_seq_len          = max_seq_len;
-            beam_hyps_.length_penalty =
-                input_tensors->isExist("len_penalty") ? input_tensors->at("len_penalty").getVal<float>() : 0.0f;
-
-            invokeInsertUnfinishedPath(beam_hyps_, finished_buf_, cum_log_probs_, batch_size, beam_width, stream_);
-            sync_check_cuda_error();
-
-            invokeFinalize(output_tensors->getPtr<int>("output_ids"),
-                           output_tensors->getPtr<int>("sequence_length"),
-                           output_tensors->getPtr<float>("cum_log_probs", nullptr),
-                           output_tensors->getPtr<float>("output_log_probs", nullptr),
-                           beam_hyps_.output_ids_tgt,
-                           beam_hyps_.sequence_lengths_tgt,
-                           beam_hyps_.normed_scores,
-                           beam_hyps_.cum_log_probs,
-                           beam_hyps_.log_probs,
-                           beam_hyps_.num_beams,
-                           beam_width,
-                           max_seq_len,
-                           batch_size,
-                           stream_);
-            sync_check_cuda_error();
-        }
-        else {
-            // For beam search, do gather_tree
-            invokeGatherTree(output_ids_transpose_buf_,
-                             output_tensors->at("sequence_length").getPtr<int>(),
-                             max_seq_len,
-                             batch_size,
-                             beam_width,
-                             output_ids_buf_ + batch_size * beam_width,
-                             parent_ids_buf_ + batch_size * beam_width,
-                             end_ids_buf_,
-                             stream_);
-
-            // transpose and take output_parent_ids as inter buffer
-            invokeTransposeAxis01(output_tensors->at("output_ids").getPtr<int>(),
-                                  output_ids_transpose_buf_,
-                                  max_seq_len,
-                                  batch_size * beam_width,
-                                  1,
-                                  stream_);
-        }
-    }
-    else {
-        // For sampling, only transpose the results to output_tensor
-        invokeTransposeAxis01(output_tensors->at("output_ids").getPtr<int>(),
-                              output_ids_buf_ + batch_size * beam_width,
-                              max_seq_len,
-                              batch_size * beam_width,
-                              1,
-                              stream_);
-    }
-
-    // Return the cumulative log probability and log probability if requested.
-    if (beam_width == 1 || !using_beam_hyps) {
-        if (output_tensors->isExist("output_log_probs")) {
-            invokeTransposeAxis01(output_tensors->at("output_log_probs").getPtr<float>(),
-                                  output_log_probs_buf_,
-                                  max_seq_len,
-                                  batch_size * beam_width,
-                                  1,
-                                  stream_);
-        }
-        if (output_tensors->isExist("cum_log_probs")) {
-            Tensor cum_log_probs = output_tensors->at("cum_log_probs");
-            FT_CHECK_WITH_INFO(cum_log_probs.size() == batch_size * beam_width,
-                               "The shape of cum_log_probs does not match with batch_size x beam_width.");
-            cudaD2Dcpy(cum_log_probs.getPtr<float>(), cum_log_probs_, batch_size * beam_width);
-        }
-    }
-
-    if (output_tensors->isExist("is_finished")) {
-        cudaD2Dcpy(
-            output_tensors->at("is_finished").getPtr<bool>(), finished_buf_, output_tensors->at("is_finished").size());
-    }
-}
-
-template<typename T>
-void T5Decoding<T>::sendTensorsToFirstPipelineNode(TensorMap* output_tensors, TensorMap const* input_tensors)
-{
-    if (pipeline_para_.world_size_ == 1) {
-        // throw errors when detected
-        ftNcclStreamSynchronize(tensor_para_, pipeline_para_, stream_);
-        return;
-    }
-
-    auto const batch_size  = output_tensors->at("output_ids").shape[0];
-    auto const beam_width  = output_tensors->at("output_ids").shape[1];
-    auto const max_seq_len = output_tensors->at("output_ids").shape[2];
-
-    ftNcclGroupStart();
-    if (pipeline_para_.rank_ == pipeline_para_.world_size_ - 1) {
-        ftNcclSend(output_tensors->at("output_ids").getPtr<int>(),
-                   batch_size * beam_width * max_seq_len,
-                   0,
-                   pipeline_para_,
-                   stream_);
-
-        ftNcclSend(
-            output_tensors->at("sequence_length").getPtr<int>(), batch_size * beam_width, 0, pipeline_para_, stream_);
-
-        if (output_tensors->isExist("cum_log_probs") && output_tensors->at("cum_log_probs").data != nullptr) {
-            ftNcclSend(output_tensors->at("cum_log_probs").getPtr<float>(),
-                       batch_size * beam_width,
-                       0,
-                       pipeline_para_,
-                       stream_);
-        }
-
-        if (output_tensors->isExist("output_log_probs") && output_tensors->at("output_log_probs").data != nullptr) {
-            ftNcclSend(output_tensors->at("output_log_probs").getPtr<float>(),
-                       batch_size * beam_width * max_seq_len,
-                       0,
-                       pipeline_para_,
-                       stream_);
-        }
-    }
-    else if (pipeline_para_.rank_ == 0) {
-        ftNcclRecv(output_tensors->at("output_ids").getPtr<int>(),
-                   batch_size * beam_width * max_seq_len,
-                   pipeline_para_.world_size_ - 1,
-                   pipeline_para_,
-                   stream_);
-
-        ftNcclRecv(output_tensors->at("sequence_length").getPtr<int>(),
-                   batch_size * beam_width,
-                   pipeline_para_.world_size_ - 1,
-                   pipeline_para_,
-                   stream_);
-
-        if (output_tensors->isExist("cum_log_probs") && output_tensors->at("cum_log_probs").data != nullptr) {
-            ftNcclRecv(output_tensors->at("cum_log_probs").getPtr<float>(),
-                       batch_size * beam_width,
-                       pipeline_para_.world_size_ - 1,
-                       pipeline_para_,
-                       stream_);
-        }
-
-        if (output_tensors->isExist("output_log_probs") && output_tensors->at("output_log_probs").data != nullptr) {
-            ftNcclRecv(output_tensors->at("output_log_probs").getPtr<float>(),
-                       batch_size * beam_width * max_seq_len,
-                       pipeline_para_.world_size_ - 1,
-                       pipeline_para_,
-                       stream_);
-        }
-    }
-    ftNcclGroupEnd();
-
-    // throw errors when detected
-    ftNcclStreamSynchronize(tensor_para_, pipeline_para_, stream_);
+    forward(&output_map, &input_map, decoding_weights, profile_iters);
 }
 
 template<typename T>
 void T5Decoding<T>::forward(TensorMap*                 output_tensors,
                             TensorMap*                 input_tensors,
-                            const T5DecodingWeight<T>* decoding_weights)
+                            const T5DecodingWeight<T>* decoding_weights,
+                            const int                  profile_iters)
 {
     // input_tensors:
     //      encoder_output [batch_size, mem_max_seq_len, memory_hidden_dimension]
@@ -720,7 +538,7 @@ void T5Decoding<T>::forward(TensorMap*                 output_tensors,
     const size_t local_batch_size = getLocalBatchSize(batch_size, 1, pipeline_para_.world_size_);
     FT_CHECK(batch_size % local_batch_size == 0);
     const size_t iteration_num = batch_size / local_batch_size;
-    for (int step = max_input_length; step <= (int)max_seq_len; step++) {
+    for (int step = (int)max_seq_len - 1; step <= (int)max_seq_len; step++) {
         FT_LOG_DEBUG("%s::step: %d", __PRETTY_FUNCTION__, step);
         const int src_indir_idx = beam_width > 1 ? (step - 1) & 0x1 : 0;
         const int tgt_indir_idx = 1 - src_indir_idx;
@@ -803,7 +621,7 @@ void T5Decoding<T>::forward(TensorMap*                 output_tensors,
             }
 
             decoder_->forward(
-                &decoder_output_tensors, &decoder_input_tensors, &decoding_weights->decoder_layer_weights);
+                &decoder_output_tensors, &decoder_input_tensors, &decoding_weights->decoder_layer_weights, (int)max_seq_len, profile_iters);
 
             bool t5_with_bias = decoding_weights->t5_with_bias;
 
@@ -1054,17 +872,153 @@ void T5Decoding<T>::forward(TensorMap*                 output_tensors,
         if (sum == batch_size * beam_width) {
             break;
         }
-        else if (step < (int)max_seq_len && token_generated_cb_) {
-            setOutputTensors(output_tensors, input_tensors);
-            sendTensorsToFirstPipelineNode(output_tensors, input_tensors);
-            if (pipeline_para_.rank_ == 0 && tensor_para_.rank_ == 0) {
-                token_generated_cb_(output_tensors, token_generated_ctx_);
+    }
+
+    if (pipeline_para_.rank_ == pipeline_para_.world_size_ - 1) {
+        if (beam_width > 1) {
+            if (using_beam_hyps) {
+                beam_hyps_.sequence_lengths_src = sequence_lengths;
+                beam_hyps_.parent_ids_src       = parent_ids_buf_;
+                beam_hyps_.output_ids_src       = output_ids_buf_;
+                beam_hyps_.log_probs_src        = output_log_probs_buf_;
+                beam_hyps_.max_seq_len          = max_seq_len;
+                beam_hyps_.length_penalty =
+                    input_tensors->isExist("len_penalty") ? input_tensors->at("len_penalty").getVal<float>() : 0.0f;
+
+                invokeInsertUnfinishedPath(beam_hyps_, finished_buf_, cum_log_probs_, batch_size, beam_width, stream_);
+                sync_check_cuda_error();
+
+                invokeFinalize(output_tensors->getPtr<int>("output_ids"),
+                               output_tensors->getPtr<int>("sequence_length"),
+                               output_tensors->getPtr<float>("cum_log_probs", nullptr),
+                               output_tensors->getPtr<float>("output_log_probs", nullptr),
+                               beam_hyps_.output_ids_tgt,
+                               beam_hyps_.sequence_lengths_tgt,
+                               beam_hyps_.normed_scores,
+                               beam_hyps_.cum_log_probs,
+                               beam_hyps_.log_probs,
+                               beam_hyps_.num_beams,
+                               beam_width,
+                               max_seq_len,
+                               batch_size,
+                               stream_);
+                sync_check_cuda_error();
+            }
+            else {
+                // For beam search, do gather_tree
+                invokeGatherTree(output_ids_transpose_buf_,
+                                 output_tensors->at("sequence_length").getPtr<int>(),
+                                 max_seq_len,
+                                 batch_size,
+                                 beam_width,
+                                 output_ids_buf_ + batch_size * beam_width,
+                                 parent_ids_buf_ + batch_size * beam_width,
+                                 end_ids_buf_,
+                                 stream_);
+
+                // transpose and take output_parent_ids as inter buffer
+                invokeTransposeAxis01(output_tensors->at("output_ids").getPtr<int>(),
+                                      output_ids_transpose_buf_,
+                                      max_seq_len,
+                                      batch_size * beam_width,
+                                      1,
+                                      stream_);
+            }
+        }
+        else {
+            // For sampling, only transpose the results to output_tensor
+            invokeTransposeAxis01(output_tensors->at("output_ids").getPtr<int>(),
+                                  output_ids_buf_ + batch_size * beam_width,
+                                  max_seq_len,
+                                  batch_size * beam_width,
+                                  1,
+                                  stream_);
+        }
+
+        // Return the cumulative log probability and log probability if requested.
+        if (beam_width == 1 || !using_beam_hyps) {
+            if (output_tensors->isExist("output_log_probs")) {
+                invokeTransposeAxis01(output_tensors->at("output_log_probs").getPtr<float>(),
+                                      output_log_probs_buf_,
+                                      max_seq_len,
+                                      batch_size * beam_width,
+                                      1,
+                                      stream_);
+            }
+            if (output_tensors->isExist("cum_log_probs")) {
+                Tensor cum_log_probs = output_tensors->at("cum_log_probs");
+                FT_CHECK_WITH_INFO(cum_log_probs.size() == batch_size * beam_width,
+                                   "The shape of cum_log_probs does not match with batch_size x beam_width.");
+                cudaD2Dcpy(cum_log_probs.getPtr<float>(), cum_log_probs_, batch_size * beam_width);
             }
         }
     }
 
-    setOutputTensors(output_tensors, input_tensors);
-    sendTensorsToFirstPipelineNode(output_tensors, input_tensors);
+    if (pipeline_para_.world_size_ > 1) {
+        ftNcclGroupStart();
+        if (pipeline_para_.rank_ == pipeline_para_.world_size_ - 1) {
+            ftNcclSend(output_tensors->at("output_ids").getPtr<int>(),
+                       batch_size * beam_width * max_seq_len,
+                       0,
+                       pipeline_para_,
+                       stream_);
+
+            ftNcclSend(output_tensors->at("sequence_length").getPtr<int>(),
+                       batch_size * beam_width,
+                       0,
+                       pipeline_para_,
+                       stream_);
+
+            if (output_tensors->isExist("cum_log_probs") && output_tensors->at("cum_log_probs").data != nullptr) {
+                ftNcclSend(output_tensors->at("cum_log_probs").getPtr<float>(),
+                           batch_size * beam_width,
+                           0,
+                           pipeline_para_,
+                           stream_);
+            }
+
+            if (output_tensors->isExist("output_log_probs") && output_tensors->at("output_log_probs").data != nullptr) {
+                ftNcclSend(output_tensors->at("output_log_probs").getPtr<float>(),
+                           batch_size * beam_width * max_seq_len,
+                           0,
+                           pipeline_para_,
+                           stream_);
+            }
+        }
+        else if (pipeline_para_.rank_ == 0) {
+            ftNcclRecv(output_tensors->at("output_ids").getPtr<int>(),
+                       batch_size * beam_width * max_seq_len,
+                       pipeline_para_.world_size_ - 1,
+                       pipeline_para_,
+                       stream_);
+
+            ftNcclRecv(output_tensors->at("sequence_length").getPtr<int>(),
+                       batch_size * beam_width,
+                       pipeline_para_.world_size_ - 1,
+                       pipeline_para_,
+                       stream_);
+
+            if (output_tensors->isExist("cum_log_probs") && output_tensors->at("cum_log_probs").data != nullptr) {
+                ftNcclRecv(output_tensors->at("cum_log_probs").getPtr<float>(),
+                           batch_size * beam_width,
+                           pipeline_para_.world_size_ - 1,
+                           pipeline_para_,
+                           stream_);
+            }
+
+            if (output_tensors->isExist("output_log_probs") && output_tensors->at("output_log_probs").data != nullptr) {
+                ftNcclRecv(output_tensors->at("output_log_probs").getPtr<float>(),
+                           batch_size * beam_width * max_seq_len,
+                           pipeline_para_.world_size_ - 1,
+                           pipeline_para_,
+                           stream_);
+            }
+        }
+        ftNcclGroupEnd();
+    }
+
+    // throw errors when detected
+    ftNcclStreamSynchronize(tensor_para_, pipeline_para_, stream_);
 
     if (is_free_buffer_after_forward_) {
         freeBuffer();

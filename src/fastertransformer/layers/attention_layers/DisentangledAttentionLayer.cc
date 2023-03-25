@@ -23,7 +23,8 @@ namespace fastertransformer {
 template<typename T>
 void DisentangledAttentionLayer<T>::forward(TensorMap*                output_tensors,
                                             TensorMap*                input_tensors,
-                                            const AttentionWeight<T>* attention_weights)
+                                            const AttentionWeight<T>* attention_weights,
+                                            const int max_seq_len)
 {
     // input_tensors:
     //      input_query [token_num, d_model],

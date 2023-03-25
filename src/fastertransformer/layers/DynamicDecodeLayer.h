@@ -71,7 +71,7 @@ public:
     void setup(const size_t batch_size, const size_t beam_width, TensorMap* runtime_args);
     void forward(TensorMap* output_tensors, TensorMap* input_tensors);
     void forward(std::unordered_map<std::string, Tensor>*       output_tensors,
-                 const std::unordered_map<std::string, Tensor>* input_tensors);
+                 const std::unordered_map<std::string, Tensor>* input_tensorsz);
 };
 
 }  // namespace fastertransformer

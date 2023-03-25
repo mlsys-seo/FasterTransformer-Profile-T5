@@ -5,7 +5,7 @@
 - [GPT-J](#gpt-j)
   - [Table Of Contents](#table-of-contents)
   - [Introduction](#introduction)
-    - [Inference Options](#inference-options)
+    - [Note](#note)
     - [Supported features](#supported-features)
   - [Setup](#setup)
     - [Requirements](#requirements)
@@ -98,14 +98,9 @@ Optimization in GPT-j are similar to optimization in GPT, describing in the [gpt
 
 The `beam_width` value is set by the output shape directly. When the `beam_width` of `output_ids` is larger than 1, FT will use beam search to generate tokens; otherwise, FT will use topk or topp sampling. When the inputs of beam search and sampling is invalid, like beam width 1, top k 0, top p 0.0, FT will run greedy search automatically.
 
-### Inference Options
+### Note
 
-We provide the environment variables to tune for specific usage.
-
-|        Name        |             Description                         |              Default                         |              Values accepted                         |
-| :----------------: | :----------------------------------------------: | :----------------------------------------------: | :----------------------------------------------: |
-|  `FMHA_ENABLE`     |   enable the fused multi-head attention kernels (fp16 accumulation)   | disabled | `ON` = enable fmha, otherwise disabled |
-|  `CONTEXT_ATTENTION_BMM1_HALF_ACCUM`     |   use fp16 accumulation for the qk gemm, and only make a difference to unfused multi-head attention kernels | fp32 accumulation | `ON` = fp32 accumulation, otherwise fp16 accumulation |
+- `is_context_qk_buf_float_` (whether use float accumulation for GPT-J context QK GEMM or not) is set to `false` by default. If you meet accuracy issues related to GPT-J Context attention blocks, please try to enable it in the `GptJ.h`.
 
 ### Supported features
 
@@ -195,7 +190,7 @@ By default, `-DSM` is set by 70, 75, 80 and 86. When users set more kinds of `-D
 * Download the mystic public model and convert
 
     ```bash
-    wget https://the-eye.eu/public/AI/GPT-J-6B/step_383500_slim.tar.zstd
+    wget https://mystic.the-eye.eu/public/AI/GPT-J-6B/step_383500_slim.tar.zstd
     unzstd step_383500_slim.tar.zstd
     tar -axf step_383500_slim.tar
     python3 ../examples/pytorch/gptj/utils/gptj_ckpt_convert.py --output-dir ../models/j6b_ckpt --ckpt-dir ./step_383500/

@@ -32,7 +32,8 @@ public:
                          th::Tensor&              sequence_lengths,
                          th::optional<th::Tensor> inputs_embeds,
                          th::Tensor&              output,
-                         bool                     removing_padding) = 0;
+                         bool                     removing_padding,
+                         th::optional<int64_t>    profile_iters_opt) = 0;
 };
 
 template<typename T>
@@ -80,7 +81,8 @@ public:
                  th::Tensor&              sequence_lengths,
                  th::optional<th::Tensor> inputs_embeds,
                  th::Tensor&              output,
-                 bool                     removing_padding) override;
+                 bool                     removing_padding,
+                 th::optional<int64_t>    profile_iters_opt) override;
 
 private:
     const int64_t             _head_num;
@@ -171,7 +173,7 @@ public:
     ~FasterTransformerT5Encoder();
 
     th::Tensor
-    forward(th::optional<th::Tensor> input, th::Tensor sequence_lengths, th::optional<th::Tensor> input_embeds);
+    forward(th::optional<th::Tensor> input, th::Tensor sequence_lengths, th::optional<th::Tensor> input_embeds, th::optional<int64_t>    profile_iters_opt);
 
     std::vector<th::Tensor> get_pickle_info() const;
 

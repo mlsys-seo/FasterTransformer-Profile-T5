@@ -29,7 +29,7 @@ template<typename T>
 void DynamicDecodeLayer<T>::allocateBuffer()
 {
     FT_LOG_DEBUG(__PRETTY_FUNCTION__);
-    h_pinned_finished_sum_ = (int*)allocator_->reMalloc(h_pinned_finished_sum_, sizeof(int), true, true);
+    check_cuda_error(cudaMallocHost((void**)&h_pinned_finished_sum_, sizeof(int)));
     return;
 }
 
@@ -37,7 +37,9 @@ template<typename T>
 void DynamicDecodeLayer<T>::freeBuffer()
 {
     FT_LOG_DEBUG(__PRETTY_FUNCTION__);
-    allocator_->free((void**)(&h_pinned_finished_sum_), true);
+    if (h_pinned_finished_sum_ != nullptr) {
+        check_cuda_error(cudaFreeHost(h_pinned_finished_sum_));
+    }
     return;
 }
 

@@ -88,9 +88,8 @@ def main():
     ft_model_location = args.ft_model_location + f"/{tensor_para_size}-gpu/"
     hf_model_location = args.hf_model_location
 
-    tokenizer = AutoTokenizer.from_pretrained(hf_model_location)
-    tokenizer.pad_token = tokenizer.eos_token
-    dataset_cnn = load_dataset("ccdv/cnn_dailymail", '3.0.0', cache_dir=args.cache_path)
+    # tokenizer = AutoTokenizer.from_pretrained('t5-11b')
+    # tokenizer.pad_token = tokenizer.eos_token
 
     if rank == 0 and test_hf:
         start_time = datetime.datetime.now()
@@ -106,7 +105,7 @@ def main():
     if test_ft:
         ckpt_config = configparser.ConfigParser()
 
-        ckpt_config_path = os.path.join(ft_model_location, 'config.ini')
+        ckpt_config_path = os.path.join('/workspace/data/ckpt/ft/t5/1-gpu/config.ini')
         if os.path.isfile(ckpt_config_path):
             ckpt_config.read(ckpt_config_path)
         else:
@@ -146,7 +145,12 @@ def main():
                                   )
         assert decoder_config.feed_forward_proj == encoder_config.feed_forward_proj
         assert decoder_config.feed_forward_proj == encoder_config.feed_forward_proj
-
+        
+        encoder_config.num_layers = 1
+        decoder_config.num_layers = 1
+        
+        print(encoder_config)
+        
         t5_with_bias = ckpt_config.getboolean("structure", "t5_with_bias")
         use_gated_activation = encoder_config.is_gated_act
         position_embedding_type = 0 if ckpt_config.get('structure', 'position_embedding_type') == 'relative' else 1
@@ -173,13 +177,16 @@ def main():
             position_embedding_type=position_embedding_type,
             weight_data_type=weight_data_type,
         )
+        
+        config = T5Config.from_pretrained("/workspace/code/multi/model_config/t5-11b.json")
+        t5_model = T5ForConditionalGeneration._from_config(config)
 
         start_time = datetime.datetime.now()
-        ft_encoder_weight.load_from_bin(ft_model_location, "Megatron")
+        ft_encoder_weight.load_from_model(t5_model)
         stop_time = datetime.datetime.now()
         print(f"[INFO] load FT encoder model spend {(stop_time - start_time).total_seconds()} sec")
         start_time = datetime.datetime.now()
-        ft_decoding_weight.load_from_bin(ft_model_location, "Megatron")
+        ft_decoding_weight.load_from_model(t5_model)
         stop_time = datetime.datetime.now()
         print(f"[INFO] load FT decoding model spend {(stop_time - start_time).total_seconds()} sec")
         if args.data_type == "fp32":
@@ -196,7 +203,7 @@ def main():
         ft_decoding_weight.to_cuda()
 
         q_scaling = 1.0 / (math.sqrt(encoder_config.d_kv))
-        remove_padding = True
+        remove_padding = False
         ft_encoder = FTT5Encoder(ft_encoder_weight.w, args.lib_path, encoder_config.num_heads,
                                  encoder_config.d_kv, encoder_config.d_ff,
                                  encoder_config.d_model, remove_padding, encoder_config.num_layers,
@@ -227,178 +234,48 @@ def main():
     top_k = args.top_k
     top_p = args.top_p
 
-    def summarize_ft(datapoint):
-        if not disable_summarize:
-            line = "summarize: " + datapoint['article']
-        else:
-            line = datapoint['article']
-        line = line.strip()
-        line = line.replace(" n't", "n't")
+    def summarize_ft(line):
+        # line = line.strip()
+        # line = line.replace(" n't", "n't")
 
-        line_tokens = tokenizer(line, return_tensors='pt')
-
-        with torch.no_grad():
-            output, ft_output_len = ft_t5(line_tokens,
-                                          None,
-                                          beam_width,
-                                          args.max_seq_len,
-                                          top_k,
-                                          top_p,
-                                          beam_search_diversity_rate=0.0,
-                                          is_return_output_log_probs=False,
-                                          len_penalty=1.0,
-                                          is_return_cum_log_probs=False)
-        tokens = [output[0][beam_idx][:ft_output_len[0][beam_idx]] for beam_idx in range(beam_width)]
-
-        output_lines = [tokenizer.decode(output[0][beam_idx][:ft_output_len[0][beam_idx]], skip_special_tokens=True) for beam_idx in range(beam_width)]
-        output_lines = [".".join(output_line.split('.')[:4]) + "." for output_line in output_lines]
-        return output_lines, tokens
-
-    def summarize_hf(datapoint):
-        if not disable_summarize:
-            line = "summarize: " + datapoint['article']
-        else:
-            line = datapoint['article']
-        line = line.strip()
-        line = line.replace(" n't", "n't")
-
-        line_encoded = tokenizer.encode(line, return_tensors='pt')
-        line_encoded = line_encoded.cuda()
+        # line_tokens = tokenizer(line, return_tensors='pt')
+        _MAX_SEQ = 128
+        _BATCH = 512
+        
+        
+        line_tokens = torch.randint(1, 10000, (_BATCH, _MAX_SEQ), dtype=torch.int32, requires_grad=False).to('cuda')
+        mem_seq_len = torch.tensor([_MAX_SEQ for _ in range(_BATCH)], dtype=torch.int32, requires_grad=False).to('cuda')
 
         with torch.no_grad():
-            if beam_width > 1:
-                output = model.generate(line_encoded,
-                                        max_length=args.max_seq_len + 1,
-                                        num_beams=beam_width,
-                                        num_return_sequences=beam_width,
-                                        early_stopping=True,
-                                        eos_token_id=tokenizer.eos_token_id,
-                                        pad_token_id=tokenizer.pad_token_id)
-            else:
-                output = model.generate(line_encoded,
-                                        max_length=args.max_seq_len + 1,
-                                        do_sample=True,
-                                        top_k=top_k if top_k > 0 else None,
-                                        top_p=top_p if top_p > 0.0 else None,
-                                        eos_token_id=tokenizer.eos_token_id,
-                                        pad_token_id=tokenizer.pad_token_id)
-        tokens = [output[beam_idx].cpu().numpy() for beam_idx in range(beam_width)]
-        output_lines = [tokenizer.decode(output[beam_idx], skip_special_tokens=True) for beam_idx in range(beam_width)]
-        output_lines = [".".join(output_line.split('.')[:4]) + "." for output_line in output_lines]
-        return output_lines, tokens
+            ft_t5(line_tokens,
+                mem_seq_len,
+                beam_width,
+                args.max_seq_len,
+                top_k,
+                top_p,
+                beam_search_diversity_rate=0.0,
+                is_return_output_log_probs=False,
+                len_penalty=1.0,
+                is_return_cum_log_probs=False)
 
-    if disable_summarize:
-        tokens = []
-    else:
-        metric_fts = [load_metric("rouge") for beam_idx in range(beam_width)]
-        metric_hfs = [load_metric("rouge") for beam_idx in range(beam_width)]
 
-    if not disable_summarize:
-        datapoint = dataset_cnn['test'][0]
-        if test_ft:
-            summary_ft, _ = summarize_ft(datapoint)
-            if rank == 0:
-                print('---------------------------------------------------------')
-                print('FT Generated : ')
-                print(' Article : ', datapoint['article'])
-                print('\n Highlights : ', datapoint['highlights'])
-                print('\n Summary : ', summary_ft)
-                print('---------------------------------------------------------')
-                for i in range(beam_width):
-                    metric_fts[i].add_batch(predictions=[summary_ft[i]], references=[[datapoint['highlights']]])
-
-        if test_hf and rank == 0:
-            summary_hf, _ = summarize_hf(datapoint)
-            print('---------------------------------------------------------')
-            print('HF Generated : ')
-            print(' Article : ', datapoint['article'])
-            print('\n Highlights : ', datapoint['highlights'])
-            print('\n Summary : ', summary_hf)
-            print('---------------------------------------------------------')
-            for i in range(beam_width):
-                metric_hfs[i].add_batch(predictions=[summary_hf[i]], references=[[datapoint['highlights']]])
-
-    ft_time = 0.0
-    hf_time = 0.0
+    datapoint = "hello world"
     for data_point_idx in tqdm(range(1, 11490, int(11490 / args.max_ite))):
         try:
-            datapoint = dataset_cnn['test'][data_point_idx]
-
-            start_time = datetime.datetime.now()
-            if test_ft:
-                summary_ft, tokens_ft = summarize_ft(datapoint)
-            stop_time = datetime.datetime.now()
-            ft_time += (stop_time - start_time).total_seconds()
-
-            if rank == 0 and ((test_hf and not disable_summarize) or disable_summarize):
-                start_time = datetime.datetime.now()
-                summary_hf, tokens_hf = summarize_hf(datapoint)
-                stop_time = datetime.datetime.now()
-                hf_time += (stop_time - start_time).total_seconds()
-
-            if rank == 0:
-                if not disable_summarize:
-                    if test_ft:
-                        for i in range(beam_width):
-                            metric_fts[i].add_batch(predictions=[summary_ft[i]], references=[[datapoint['highlights']]])
-                    if test_hf:
-                        for i in range(beam_width):
-                            metric_hfs[i].add_batch(predictions=[summary_hf[i]], references=[[datapoint['highlights']]])
-                else:
-                    tokens.append((tokens_ft, tokens_hf))
+            summarize_ft(datapoint)
         except Exception as e:
             print(f'Error with datapoint: {data_point_idx} with error {e}')
 
-    def compute_exact_match(tokens, n_tokens=[1, 10, 25, 50, 100, 150, 200, 250]):
-        em_metrics = []
-        for t in n_tokens:
-            errors = 0
-            total = 0
-            for ft_tokens, hf_tokens in tokens:
-                if len(ft_tokens) > t and len(hf_tokens) > t:
-                    total = total + 1
-                    if not np.array_equal(ft_tokens[:t], hf_tokens[:t]):
-                        errors = errors + 1
-
-            if total > 0:
-                print(f"{t}-token exact match acc: {100*(1-errors/total):.2f}")
-                em_metrics.append(1 - errors / total)
-            else:
-                em_metrics.append(np.nan)
-
-        return em_metrics
-
-    if rank == 0:
-        if not disable_summarize:
-            if test_ft:
-                computed_metrics_fts = [metric_ft.compute() for metric_ft in metric_fts]
-
-            if test_hf:
-                computed_metrics_hfs = [metric_hf.compute() for metric_hf in metric_hfs]
-
-                print(f'Hugging Face (total latency: {hf_time} sec)')
-                for i in range(beam_width):
-                    computed_metrics_hf = computed_metrics_hfs[i]
-                    print(f"beam_id: {i}")
-                    for key in computed_metrics_hf.keys():
-                        print(f'{key} : {computed_metrics_hf[key].mid[2]*100}')
-                    print()
-
-            if test_ft:
-                print(f'Faster Transformers (total latency: {ft_time} sec)')
-                for i in range(beam_width):
-                    computed_metrics_ft = computed_metrics_fts[i]
-                    print(f"beam_id: {i}")
-                    for key in computed_metrics_ft.keys():
-                        print(f'{key} : {computed_metrics_ft[key].mid[2]*100}')
-                    print()
-                if args.rougeLsum_threshold != None:
-                    assert computed_metrics_fts[0]["rougeLsum"].mid[2] * \
-                        100 >= args.rougeLsum_threshold, "[INFO] TEST FAIL !"
-                    print(f"[INFO] TEST PASS !")
-        else:
-            em_metrics = compute_exact_match(tokens)
-
 
 if __name__ == '__main__':
+    # tokenizer = AutoTokenizer.from_pretrained("t5-11b")
+    # tokenizer.pad_token = tokenizer.eos_token
+    # line_tokens = tokenizer(["Hello World", "Hello abcd"], return_tensors='pt', padding=True)
+    # print(line_tokens.input_ids)
+    # print(line_tokens.input_ids.shape)
+    # print("=============================")
+    # mem_seq_len = torch.sum(line_tokens.attention_mask, dim=1).type(torch.int32)
+    # print(mem_seq_len)
+    # print(mem_seq_len.shape)
+    # a = 1
     main()

@@ -211,11 +211,13 @@ std::vector<th::Tensor> FTT5Decoding<T>::forward(th::optional<int64_t>    beam_w
                                                  th::optional<bool>       is_return_cum_log_probs_opt,
                                                  th::optional<bool>       is_return_cross_attentions_opt,
                                                  th::optional<th::Tensor> bad_words_list_opt,
-                                                 th::optional<th::Tensor> stop_words_list_opt)
+                                                 th::optional<th::Tensor> stop_words_list_opt,
+                                                 th::optional<int64_t>    profile_iters_opt)
 {
     // input validation
     size_t beam_width = beam_width_opt.has_value() ? (size_t)beam_width_opt.value() : 1;
     uint   top_k      = top_k_opt.has_value() ? (uint)top_k_opt.value() : 1;
+    int profile_iters = profile_iters_opt.has_value() ? (int)profile_iters_opt.value() : 0;
     float  top_p      = top_p_opt.has_value() ? (float)top_p_opt.value() : 0.0f;
     float  beam_search_diversity_rate =
         beam_search_diversity_rate_opt.has_value() ? (float)beam_search_diversity_rate_opt.value() : 0.0f;
@@ -403,7 +405,7 @@ std::vector<th::Tensor> FTT5Decoding<T>::forward(th::optional<int64_t>    beam_w
         th_output_tensors.push_back(cross_attentions);
     }
 
-    decoding.forward(&output_tensors, &input_tensors, &decoding_weights);
+    decoding.forward(&output_tensors, &input_tensors, &decoding_weights, (int)profile_iters);
     return th_output_tensors;
 }
 
@@ -662,7 +664,8 @@ std::vector<th::Tensor> FasterTransformerT5Decoding::forward(th::optional<int64_
                                                              th::optional<bool>       is_return_cum_log_probs,
                                                              th::optional<bool>       is_return_cross_attentions,
                                                              th::optional<th::Tensor> bad_words_list,
-                                                             th::optional<th::Tensor> stop_words_list)
+                                                             th::optional<th::Tensor> stop_words_list,
+                                                             th::optional<int64_t>    profile_iters_opt)
 {
     CHECK_INPUT(memory, _st);
     CHECK_TH_CUDA(memory_seq_lens);
@@ -686,7 +689,8 @@ std::vector<th::Tensor> FasterTransformerT5Decoding::forward(th::optional<int64_
                                        is_return_cum_log_probs,
                                        is_return_cross_attentions,
                                        bad_words_list,
-                                       stop_words_list);
+                                       stop_words_list,
+                                       profile_iters_opt);
     return results;
 }
 

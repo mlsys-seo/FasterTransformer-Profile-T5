@@ -48,9 +48,6 @@ struct T5TritonModelInstance: AbstractTransformerModelInstance {
     std::shared_ptr<std::unordered_map<std::string, triton::Tensor>>
     forward(std::shared_ptr<std::unordered_map<std::string, triton::Tensor>> input_tensors) override;
 
-    static std::shared_ptr<std::unordered_map<std::string, triton::Tensor>>
-    convert_outputs(ft::TensorMap& output_tensors);
-
 private:
     const std::unique_ptr<ft::T5Encoder<T>>                       t5_encoder_;
     const std::shared_ptr<ft::T5EncoderWeight<T>>                 t5_encoder_weight_;
@@ -63,6 +60,7 @@ private:
     const std::unique_ptr<cudaDeviceProp>                         cuda_device_prop_ptr_;
 
     ft::TensorMap convert_inputs(std::shared_ptr<std::unordered_map<std::string, triton::Tensor>> input_tensors);
+    std::shared_ptr<std::unordered_map<std::string, triton::Tensor>> convert_outputs(ft::TensorMap& output_tensors);
 
     void allocateBuffer(const size_t request_batch_size,
                         const size_t beam_width,

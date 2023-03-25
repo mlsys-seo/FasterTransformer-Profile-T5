@@ -15,6 +15,7 @@
  */
 
 #include "src/fastertransformer/models/t5/T5Decoder.h"
+#include "src/fastertransformer/utils/nvtx_utils.h"
 
 namespace fastertransformer {
 
@@ -145,14 +146,14 @@ void T5Decoder<T>::allocateBuffer()
         decoder_layer_output_ = reinterpret_cast<T*>(
             allocator_->reMalloc(decoder_layer_output_, sizeof(T) * max_batch_size_ * d_model_, false));
         // for moe
-        expert_scales_ = reinterpret_cast<T*>(
-            allocator_->malloc(sizeof(T) * pad_to_multiple_of_16(moe_k_ * max_batch_size_), false));
-        expanded_source_row_to_expanded_dest_row_ = reinterpret_cast<int*>(
-            allocator_->malloc(sizeof(int) * pad_to_multiple_of_16(moe_k_ * max_batch_size_), false));
-        expert_for_source_row_ = reinterpret_cast<int*>(
-            allocator_->malloc(sizeof(int) * pad_to_multiple_of_16(moe_k_ * max_batch_size_), false));
-        fc2_result_ = reinterpret_cast<T*>(
-            allocator_->malloc(sizeof(T) * pad_to_multiple_of_16(moe_k_ * max_batch_size_ * d_model_), false));
+        // expert_scales_ = reinterpret_cast<T*>(
+        //     allocator_->malloc(sizeof(T) * pad_to_multiple_of_16(moe_k_ * max_batch_size_), false));
+        // expanded_source_row_to_expanded_dest_row_ = reinterpret_cast<int*>(
+        //     allocator_->malloc(sizeof(int) * pad_to_multiple_of_16(moe_k_ * max_batch_size_), false));
+        // expert_for_source_row_ = reinterpret_cast<int*>(
+        //     allocator_->malloc(sizeof(int) * pad_to_multiple_of_16(moe_k_ * max_batch_size_), false));
+        // fc2_result_ = reinterpret_cast<T*>(
+        //     allocator_->malloc(sizeof(T) * pad_to_multiple_of_16(moe_k_ * max_batch_size_ * d_model_), false));
         is_allocate_buffer_ = true;
     }
 }
@@ -174,14 +175,14 @@ void T5Decoder<T>::allocateBuffer(size_t batch_size)
     decoder_layer_output_ =
         reinterpret_cast<T*>(allocator_->reMalloc(decoder_layer_output_, sizeof(T) * batch_size * d_model_, false));
     // for moe
-    expert_scales_ = reinterpret_cast<T*>(
-        allocator_->reMalloc(expert_scales_, sizeof(T) * pad_to_multiple_of_16(moe_k_ * batch_size), false));
-    expanded_source_row_to_expanded_dest_row_ = reinterpret_cast<int*>(allocator_->reMalloc(
-        expanded_source_row_to_expanded_dest_row_, sizeof(int) * pad_to_multiple_of_16(moe_k_ * batch_size), false));
-    expert_for_source_row_                    = reinterpret_cast<int*>(
-        allocator_->reMalloc(expert_for_source_row_, sizeof(int) * pad_to_multiple_of_16(moe_k_ * batch_size), false));
-    fc2_result_ = reinterpret_cast<T*>(
-        allocator_->reMalloc(fc2_result_, sizeof(T) * pad_to_multiple_of_16(moe_k_ * batch_size * d_model_), false));
+    // expert_scales_ = reinterpret_cast<T*>(
+    //     allocator_->reMalloc(expert_scales_, sizeof(T) * pad_to_multiple_of_16(moe_k_ * batch_size), false));
+    // expanded_source_row_to_expanded_dest_row_ = reinterpret_cast<int*>(allocator_->reMalloc(
+    //     expanded_source_row_to_expanded_dest_row_, sizeof(int) * pad_to_multiple_of_16(moe_k_ * batch_size), false));
+    // expert_for_source_row_                    = reinterpret_cast<int*>(
+    //     allocator_->reMalloc(expert_for_source_row_, sizeof(int) * pad_to_multiple_of_16(moe_k_ * batch_size), false));
+    // fc2_result_ = reinterpret_cast<T*>(
+    //     allocator_->reMalloc(fc2_result_, sizeof(T) * pad_to_multiple_of_16(moe_k_ * batch_size * d_model_), false));
     is_allocate_buffer_ = true;
 }
 
@@ -197,10 +198,10 @@ void T5Decoder<T>::freeBuffer()
         allocator_->free((void**)(&normed_cross_attn_output_));
         allocator_->free((void**)(&decoder_layer_output_));
 
-        allocator_->free((void**)(&expert_scales_));
-        allocator_->free((void**)(&expanded_source_row_to_expanded_dest_row_));
-        allocator_->free((void**)(&expert_for_source_row_));
-        allocator_->free((void**)(&fc2_result_));
+        // allocator_->free((void**)(&expert_scales_));
+        // allocator_->free((void**)(&expanded_source_row_to_expanded_dest_row_));
+        // allocator_->free((void**)(&expert_for_source_row_));
+        // allocator_->free((void**)(&fc2_result_));
 
         is_allocate_buffer_ = false;
     }
@@ -346,7 +347,9 @@ int T5Decoder<T>::getFirstLayerParallelId()
 template<typename T>
 void T5Decoder<T>::forward(std::vector<Tensor>*                         output_tensors,
                            const std::vector<Tensor>*                   input_tensors,
-                           const std::vector<T5DecoderLayerWeight<T>*>* decoder_layer_weight)
+                           const std::vector<T5DecoderLayerWeight<T>*>* decoder_layer_weight,
+                           const int                                    max_seq_len,
+                           const int                                    profile_iters)
 {
     // input tensors:
     //      decoder_input [local_batch_size, d_model_],
@@ -371,7 +374,7 @@ void T5Decoder<T>::forward(std::vector<Tensor>*                         output_t
     //      attention_output: shape = [num_layer / pipeline_para_.world_size_, batch_size, beam,
     //          head_num / tensor_para_.world_size_, max_seq_len, mem_max_seq_len]
     //          offset = [batch_offset, layer_offset_base] optional, float*
-
+    // std::cout<<"-----------------------------------"<<std::to_string(profile_iters)<<std::endl;
     FT_CHECK(input_tensors->size() >= 9 && input_tensors->size() <= 10);
     FT_CHECK(output_tensors->size() == 5 || output_tensors->size() == 6);
     isValidBatchSize(input_tensors->at(0).shape[0]);
@@ -382,6 +385,7 @@ void T5Decoder<T>::forward(std::vector<Tensor>*                         output_t
     const uint     ite             = input_tensors->at(7).getVal<uint>();
     const DataType data_type       = getTensorType<T>();
     const bool     has_ia3         = input_tensors->size() == 10;
+    const uint     step            = input_tensors->at(4).getVal<uint>();
 
     std::vector<size_t> self_k_cache_shape;
     self_k_cache_shape.push_back(local_batch_size);
@@ -398,9 +402,22 @@ void T5Decoder<T>::forward(std::vector<Tensor>*                         output_t
         local_batch_size, output_tensors->at(3).shape[2], output_tensors->at(3).shape[3]};
 
     const bool output_cross_attention = output_tensors->size() == 6;
-    const uint max_seq_len            = output_cross_attention ? output_tensors->at(5).shape[4] : 0;
+    const uint max_seq_len_           = output_cross_attention ? output_tensors->at(5).shape[4] : 0;
 
-    for (uint l = 0; l < num_layer_; l++) {
+    std::vector<float> time_list;
+    bool is_profile = profile_iters == 0 ? false : true;
+    int iter_cnt = profile_iters;
+    if(profile_iters == 0) {
+        iter_cnt = num_layer_;
+    }
+    uint l = 0;
+    for (uint iter = 0; iter < iter_cnt; iter++) {
+        float elapsed_time_ms=0.0f;
+        cudaEvent_t start, stop;
+        cudaEventCreate(&start);
+        cudaEventCreate(&stop);
+        cudaEventRecord(start, 0);
+        PUSH_RANGE("Decoder Layer " + std::to_string(l));
         if (isValidLayerParallelId(l) == false) {
             continue;
         }
@@ -524,16 +541,16 @@ void T5Decoder<T>::forward(std::vector<Tensor>*                         output_t
             int          local_layer_id          = l - getFirstLayerParallelId();
             const size_t cross_attentions_offset = local_layer_id * output_tensors->at(5).offsets[1]
                                                    + output_tensors->at(5).offsets[0] * head_num_
-                                                         / tensor_para_.world_size_ * max_seq_len * mem_max_seq_len;
+                                                         / tensor_para_.world_size_ * max_seq_len_ * mem_max_seq_len;
             cross_attention_output_tensors.insert(
                 "cross_attentions",
                 Tensor{MEMORY_GPU,
                        TYPE_FP32,
-                       {local_batch_size, head_num_ / tensor_para_.world_size_, max_seq_len, mem_max_seq_len},
+                       {local_batch_size, head_num_ / tensor_para_.world_size_, max_seq_len_, mem_max_seq_len},
                        output_tensors->at(5).getPtrWithOffset<float>(cross_attentions_offset)});
         }
         cross_attention_layer_->forward(
-            &cross_attention_output_tensors, &cross_attention_input_tensors, &layer_weight->cross_attention_weights);
+            &cross_attention_output_tensors, &cross_attention_input_tensors, &layer_weight->cross_attention_weights, max_seq_len);
 
         invokeGeneralAddBiasResidualT5PreLayerNorm(cross_attn_output_,
                                                    normed_cross_attn_output_,
@@ -621,11 +638,32 @@ void T5Decoder<T>::forward(std::vector<Tensor>*                         output_t
                        pipeline_para_,
                        stream_);
         }
+        cudaEventRecord(stop, 0);
+        cudaEventSynchronize(stop);
+        cudaEventElapsedTime(&elapsed_time_ms, start, stop);
+        time_list.push_back(elapsed_time_ms);
+        // std::cout<<"time: "<<std::to_string(elapsed_time_ms)<<std::endl;
+        cudaEventDestroy(start);
+        cudaEventDestroy(stop);
+        POP_RANGE;
     }
 
     if (is_free_buffer_after_forward_ == true) {
         freeBuffer();
     }
+    std::string prefix = step == max_seq_len ? "Without_KV" : "With_KV";
+    std::sort(time_list.begin(), time_list.end());
+    time_list.pop_back();
+    float mean = std::accumulate(time_list.begin(), time_list.end(), 0.0) / time_list.size();
+    std::cout<<std::to_string(local_batch_size)<<"-Decoder-"<<prefix<<"-"<<std::to_string(mean)<<std::endl;
+
+    if(!is_profile) {
+        l++;
+    }
+    // for (int i = 0; i < time_list.size(); i++) {
+    //     std::cout<<"time: "<<std::to_string(time_list[i])<<std::endl;
+    // }
+    // std::cout<<"End forward"<<std::endl;
 }
 
 template class T5Decoder<float>;

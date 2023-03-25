@@ -22,7 +22,8 @@ namespace fastertransformer {
 template<typename T>
 void TensorParallelGptContextAttentionLayer<T>::forward(TensorMap*                output_tensors,
                                                         TensorMap*                input_tensors,
-                                                        const AttentionWeight<T>* attention_weights)
+                                                        const AttentionWeight<T>* attention_weights,
+                                                        const int max_seq_len)
 {
     // input_tensors:
     //      input_query [batch_size * seq_len, hidden_dimension]

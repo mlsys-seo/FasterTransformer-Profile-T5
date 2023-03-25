@@ -18,6 +18,7 @@
 #include "src/fastertransformer/kernels/add_residual_kernels.h"
 #include "src/fastertransformer/kernels/decoding_kernels.h"
 #include "src/fastertransformer/utils/Tensor.h"
+#include "src/fastertransformer/utils/nvtx_utils.h"
 
 namespace fastertransformer {
 
@@ -259,7 +260,7 @@ template<typename T>
 void T5Encoder<T>::allocateBuffer()
 {
     if (is_allocate_buffer_ == false) {
-        h_pinned_token_num_ptr_ = (size_t*)allocator_->reMalloc(h_pinned_token_num_ptr_, sizeof(size_t), true, true);
+        check_cuda_error(cudaMallocHost((void**)&h_pinned_token_num_ptr_, sizeof(size_t)));
         padding_offset_ =
             (int*)allocator_->reMalloc(padding_offset_, sizeof(int) * max_batch_size_ * max_seq_len_, false);
         trt_mha_padding_offset_ =
@@ -290,14 +291,14 @@ void T5Encoder<T>::allocateBuffer()
                 normed_attn_out_buf_, sizeof(T) * max_batch_size_ * max_seq_len_ * d_model_, false);
         }
         // for moe
-        expert_scales_ =
-            (T*)allocator_->malloc(sizeof(T) * pad_to_multiple_of_16(moe_k_ * max_batch_size_ * max_seq_len_), false);
-        expanded_source_row_to_expanded_dest_row_ = (int*)allocator_->malloc(
-            sizeof(int) * pad_to_multiple_of_16(moe_k_ * max_batch_size_ * max_seq_len_), false);
-        expert_for_source_row_ = (int*)allocator_->malloc(
-            sizeof(int) * pad_to_multiple_of_16(moe_k_ * max_batch_size_ * max_seq_len_), false);
-        fc2_result_ =
-            (T*)allocator_->malloc(sizeof(T) * pad_to_multiple_of_16(moe_k_ * max_batch_size_ * max_seq_len_), false);
+        // expert_scales_ =
+        //     (T*)allocator_->malloc(sizeof(T) * pad_to_multiple_of_16(moe_k_ * max_batch_size_ * max_seq_len_), false);
+        // expanded_source_row_to_expanded_dest_row_ = (int*)allocator_->malloc(
+        //     sizeof(int) * pad_to_multiple_of_16(moe_k_ * max_batch_size_ * max_seq_len_), false);
+        // expert_for_source_row_ = (int*)allocator_->malloc(
+        //     sizeof(int) * pad_to_multiple_of_16(moe_k_ * max_batch_size_ * max_seq_len_), false);
+        // fc2_result_ =
+        //     (T*)allocator_->malloc(sizeof(T) * pad_to_multiple_of_16(moe_k_ * max_batch_size_ * max_seq_len_), false);
         is_allocate_buffer_ = true;
     }
 }
@@ -306,8 +307,10 @@ template<typename T>
 void T5Encoder<T>::allocateBuffer(size_t batch_size, size_t seq_len)
 {
     FT_LOG_DEBUG(__PRETTY_FUNCTION__);
-    h_pinned_token_num_ptr_ = (size_t*)allocator_->reMalloc(h_pinned_token_num_ptr_, sizeof(size_t), true, true);
-    padding_offset_         = (int*)allocator_->reMalloc(padding_offset_, sizeof(int) * batch_size * seq_len, false);
+    if (!is_allocate_buffer_) {
+        check_cuda_error(cudaMallocHost((void**)&h_pinned_token_num_ptr_, sizeof(size_t)));
+    }
+    padding_offset_ = (int*)allocator_->reMalloc(padding_offset_, sizeof(int) * batch_size * seq_len, false);
     trt_mha_padding_offset_ =
         (int*)allocator_->reMalloc(trt_mha_padding_offset_, sizeof(int) * (2 * batch_size + 1), false);
 
@@ -333,23 +336,23 @@ void T5Encoder<T>::allocateBuffer(size_t batch_size, size_t seq_len)
         normed_attn_out_buf_ =
             (T*)allocator_->reMalloc(normed_attn_out_buf_, sizeof(T) * batch_size * seq_len * d_model_, false);
     }
-    // for moe
-    expert_scales_ = (T*)allocator_->reMalloc(
-        expert_scales_, sizeof(T) * pad_to_multiple_of_16(moe_k_ * batch_size * seq_len), false);
-    expanded_source_row_to_expanded_dest_row_ =
-        (int*)allocator_->reMalloc(expanded_source_row_to_expanded_dest_row_,
-                                   sizeof(int) * pad_to_multiple_of_16(moe_k_ * batch_size * seq_len),
-                                   false);
-    expert_for_source_row_ = (int*)allocator_->reMalloc(
-        expert_for_source_row_, sizeof(int) * pad_to_multiple_of_16(moe_k_ * batch_size * seq_len), false);
-    fc2_result_ = (T*)allocator_->reMalloc(
-        fc2_result_, sizeof(T) * pad_to_multiple_of_16(moe_k_ * batch_size * seq_len * d_model_), false);
+    // // for moe
+    // expert_scales_ = (T*)allocator_->reMalloc(
+    //     expert_scales_, sizeof(T) * pad_to_multiple_of_16(moe_k_ * batch_size * seq_len), false);
+    // expanded_source_row_to_expanded_dest_row_ =
+    //     (int*)allocator_->reMalloc(expanded_source_row_to_expanded_dest_row_,
+    //                                sizeof(int) * pad_to_multiple_of_16(moe_k_ * batch_size * seq_len),
+    //                                false);
+    // expert_for_source_row_ = (int*)allocator_->reMalloc(
+    //     expert_for_source_row_, sizeof(int) * pad_to_multiple_of_16(moe_k_ * batch_size * seq_len), false);
+    // fc2_result_ = (T*)allocator_->reMalloc(
+    //     fc2_result_, sizeof(T) * pad_to_multiple_of_16(moe_k_ * batch_size * seq_len * d_model_), false);
 
-    // prompt_learning weight batch ptrs
-    prompt_learning_weight_batch_ =
-        (const T**)(allocator_->reMalloc(prompt_learning_weight_batch_, sizeof(T**) * batch_size, false));
-    tiled_prompt_lengths_buf_ =
-        (int*)(allocator_->reMalloc(tiled_prompt_lengths_buf_, sizeof(int) * batch_size, false));
+    // // prompt_learning weight batch ptrs
+    // prompt_learning_weight_batch_ =
+    //     (const T**)(allocator_->reMalloc(prompt_learning_weight_batch_, sizeof(T**) * batch_size, false));
+    // tiled_prompt_lengths_buf_ =
+    //     (int*)(allocator_->reMalloc(tiled_prompt_lengths_buf_, sizeof(int) * batch_size, false));
     is_allocate_buffer_ = true;
 }
 
@@ -357,7 +360,7 @@ template<typename T>
 void T5Encoder<T>::freeBuffer()
 {
     if (is_allocate_buffer_) {
-        allocator_->free((void**)(&h_pinned_token_num_ptr_), true);
+        check_cuda_error(cudaFreeHost(h_pinned_token_num_ptr_));
         allocator_->free((void**)(&padding_offset_));
         allocator_->free((void**)(&trt_mha_padding_offset_));
 
@@ -420,7 +423,8 @@ int T5Encoder<T>::getFirstLayerParallelId()
 template<typename T>
 void T5Encoder<T>::forward(std::vector<Tensor>*       output_tensors,
                            const std::vector<Tensor>* input_tensors,
-                           const T5EncoderWeight<T>*  t5_encoder_weights)
+                           const T5EncoderWeight<T>*  t5_encoder_weights,
+                           const int profile_iters)
 {
     // input_tensors:
     //      input_ids [batch, seqlen]
@@ -432,23 +436,25 @@ void T5Encoder<T>::forward(std::vector<Tensor>*       output_tensors,
                                                               {"sequence_length", input_tensors->at(1)}};
 
     std::unordered_map<std::string, Tensor> output_tensors_map{{"output_hidden_state", output_tensors->at(0)}};
-    forward(&output_tensors_map, &input_tensors_map, t5_encoder_weights);
+    forward(&output_tensors_map, &input_tensors_map, t5_encoder_weights, profile_iters);
 }
 
 template<typename T>
 void T5Encoder<T>::forward(std::unordered_map<std::string, Tensor>*       output_tensors,
                            const std::unordered_map<std::string, Tensor>* input_tensors,
-                           const T5EncoderWeight<T>*                      t5_encoder_weights)
+                           const T5EncoderWeight<T>*                      t5_encoder_weights,
+                           const int profile_iters)
 {
     TensorMap input_map(*input_tensors);
     TensorMap output_map(*output_tensors);
-    forward(&output_map, &input_map, t5_encoder_weights);
+    forward(&output_map, &input_map, t5_encoder_weights, profile_iters);
 }
 
 template<typename T>
 void T5Encoder<T>::forward(TensorMap*                output_tensors,
                            TensorMap*                input_tensors,
-                           const T5EncoderWeight<T>* t5_encoder_weights)
+                           const T5EncoderWeight<T>* t5_encoder_weights,
+                           const int profile_iters)
 {
     // input_tensors:
     //      input_ids [batch, seqlen]
@@ -752,8 +758,21 @@ void T5Encoder<T>::forward(TensorMap*                output_tensors,
         }
 
         DataType data_type = getTensorType<T>();
-
-        for (uint i = 0; i < num_layer_; i++) {
+        //----------------------------------------------------------------------------------------------
+        std::vector<float> time_list;
+        bool is_profile = profile_iters == 0 ? false : true;
+        int iter_cnt = profile_iters;
+        if(profile_iters == 0) {
+            iter_cnt = num_layer_;
+        }
+        uint i = 0;
+        for (uint iter = 0; iter < iter_cnt; iter++) {
+            PUSH_RANGE("Encoder");
+            float elapsed_time_ms=0.0f;
+            cudaEvent_t start, stop;
+            cudaEventCreate(&start);
+            cudaEventCreate(&stop);
+            cudaEventRecord(start, 0);
             if (!isValidLayerParallelId(i)) {
                 continue;
             }
@@ -907,73 +926,32 @@ void T5Encoder<T>::forward(TensorMap*                output_tensors,
                 ffn_layer_->forward(&ffn_output_tensors, &ffn_input_tensors, &layer_weight->ffn_weights_);
             }
 
-            if (use_moe) {
-                if (layernorm_type_ == LayerNormType::pre_layernorm) {
-                    // residual addition for moe, we should pass the unnormed attention output if using pre_layernorm
-                    // and pass the normed attention output if using post_layernorm. They all point to the
-                    // attn_out_buf_.
-                    finalize_moe_routing_kernelLauncher(fc2_result_,
-                                                        out_tensor,
-                                                        attn_out_buf_,
-                                                        layer_weight->ffn_weights_.output_weight.bias,
-                                                        expert_scales_,
-                                                        expanded_source_row_to_expanded_dest_row_,
-                                                        expert_for_source_row_,
-                                                        h_token_num,
-                                                        d_model_,
-                                                        moe_k_,
-                                                        stream_);
+            auto* ffn_bias = layer_weight->ffn_weights_.output_weight.bias;
+            if (has_adapters() && layer_weight->has_adapters()) {
+                if (ffn_bias != nullptr) {
+                    invokeAddBias(out_tensor, ffn_bias, h_token_num, d_model_, stream_);
+                    ffn_bias = nullptr;
                 }
-                else if (layernorm_type_ == LayerNormType::post_layernorm) {
-                    finalize_moe_routing_kernelLauncher(fc2_result_,
-                                                        out_tensor,
-                                                        attn_out_buf_,
-                                                        layer_weight->ffn_weights_.output_weight.bias,
-                                                        expert_scales_,
-                                                        expanded_source_row_to_expanded_dest_row_,
-                                                        expert_for_source_row_,
-                                                        h_token_num,
-                                                        d_model_,
-                                                        moe_k_,
-                                                        stream_);
-                    invokeGeneralT5LayerNorm(out_tensor,
-                                             out_tensor,
-                                             layer_weight->ffn_layernorm_weights_.gamma,
-                                             layer_weight->ffn_layernorm_weights_.beta,
-                                             layernorm_eps_,
-                                             h_token_num,
-                                             d_model_,
-                                             stream_);
-                }
+                Tensor input_tensor{MEMORY_GPU, data_type, std::vector<size_t>{h_token_num, d_model_}, out_tensor};
+                Tensor output_tensor{MEMORY_GPU, data_type, std::vector<size_t>{h_token_num, d_model_}, out_tensor};
+                adapter_layer_->forward(
+                    &input_tensor, &output_tensor, &layer_weight->adapter_weights_.after_ffn_adapter_weights_);
             }
-            else {  // not using moe
-                auto* ffn_bias = layer_weight->ffn_weights_.output_weight.bias;
-                if (has_adapters() && layer_weight->has_adapters()) {
-                    if (ffn_bias != nullptr) {
-                        invokeAddBias(out_tensor, ffn_bias, h_token_num, d_model_, stream_);
-                        ffn_bias = nullptr;
-                    }
-                    Tensor input_tensor{MEMORY_GPU, data_type, std::vector<size_t>{h_token_num, d_model_}, out_tensor};
-                    Tensor output_tensor{MEMORY_GPU, data_type, std::vector<size_t>{h_token_num, d_model_}, out_tensor};
-                    adapter_layer_->forward(
-                        &input_tensor, &output_tensor, &layer_weight->adapter_weights_.after_ffn_adapter_weights_);
-                }
 
-                if (layernorm_type_ == LayerNormType::post_layernorm) {
-                    invokeGeneralAddBiasResidualT5PreLayerNorm(out_tensor,
-                                                               out_tensor,
-                                                               attn_out_buf_,
-                                                               layer_weight->ffn_layernorm_weights_.gamma,
-                                                               layer_weight->ffn_layernorm_weights_.beta,
-                                                               ffn_bias,
-                                                               layernorm_eps_,
-                                                               h_token_num,
-                                                               d_model_,
-                                                               stream_);
-                }
-                else if (layernorm_type_ == LayerNormType::pre_layernorm) {
-                    invokeT5AddBiasResidual(out_tensor, attn_out_buf_, ffn_bias, h_token_num, d_model_, stream_);
-                }
+            if (layernorm_type_ == LayerNormType::post_layernorm) {
+                invokeGeneralAddBiasResidualT5PreLayerNorm(out_tensor,
+                                                            out_tensor,
+                                                            attn_out_buf_,
+                                                            layer_weight->ffn_layernorm_weights_.gamma,
+                                                            layer_weight->ffn_layernorm_weights_.beta,
+                                                            ffn_bias,
+                                                            layernorm_eps_,
+                                                            h_token_num,
+                                                            d_model_,
+                                                            stream_);
+            }
+            else if (layernorm_type_ == LayerNormType::pre_layernorm) {
+                invokeT5AddBiasResidual(out_tensor, attn_out_buf_, ffn_bias, h_token_num, d_model_, stream_);
             }
             sync_check_cuda_error();
 
@@ -985,7 +963,22 @@ void T5Encoder<T>::forward(TensorMap*                output_tensors,
                            pipeline_para_,
                            stream_);
             }
+            POP_RANGE;
+            cudaEventRecord(stop, 0);
+            cudaEventSynchronize(stop);
+            cudaEventElapsedTime(&elapsed_time_ms, start, stop);
+            time_list.push_back(elapsed_time_ms);
+            // std::cout<<"time: "<<std::to_string(elapsed_time_ms)<<std::endl;
+            cudaEventDestroy(start);
+            cudaEventDestroy(stop);
+            if(!is_profile) {
+                i++;
+            }
         }
+        std::sort(time_list.begin(), time_list.end());
+        time_list.pop_back();
+        float mean = std::accumulate(time_list.begin(), time_list.end(), 0.0) / time_list.size();
+        std::cout<<std::to_string(local_batch_size)<<"-Encoder-"<<std::to_string(mean)<<std::endl;
 
         if (pipeline_para_.rank_ == pipeline_para_.world_size_ - 1) {
             if (layernorm_type_ == LayerNormType::pre_layernorm) {

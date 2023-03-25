@@ -79,7 +79,7 @@ public:
     ~WindowAttentionINT8();
 
     void
-    forward(TensorMap* output_tensors, TensorMap* input_tensors, const AttentionWeight<T>* attention_weights) override;
+    forward(TensorMap* output_tensors, TensorMap* input_tensors, const AttentionWeight<T>* attention_weights, const int max_seq_len=0) override;
 
 };  // class WindowAttentionINT8
 }  // namespace fastertransformer

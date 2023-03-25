@@ -146,13 +146,15 @@ public:
 
     void forward(std::vector<Tensor>*       output_tensors,
                  const std::vector<Tensor>* input_tensors,
-                 const T5EncoderWeight<T>*  t5_weights);
+                 const T5EncoderWeight<T>*  t5_weights,
+                 const int profile_iters=0);
 
     void forward(std::unordered_map<std::string, Tensor>*       output_tensors,
                  const std::unordered_map<std::string, Tensor>* input_tensors,
-                 const T5EncoderWeight<T>*                      t5_weights);
+                 const T5EncoderWeight<T>*                      t5_weights,
+                 const int profile_iters=0);
 
-    void forward(TensorMap* output_tensors, TensorMap* input_tensors, const T5EncoderWeight<T>* t5_encoder_weights);
+    void forward(TensorMap* output_tensors, TensorMap* input_tensors, const T5EncoderWeight<T>* t5_encoder_weights, const int profile_iters=0);
 
     inline size_t getDModel()
     {

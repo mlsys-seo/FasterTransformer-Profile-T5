@@ -24,7 +24,8 @@ namespace fastertransformer {
 template<typename T>
 void GptContextAttentionLayer<T>::forward(TensorMap*                output_tensors,
                                           TensorMap*                input_tensors,
-                                          const AttentionWeight<T>* attention_weights)
+                                          const AttentionWeight<T>* attention_weights,
+                                          const int max_seq_len)
 {
     // input_tensors:
     //      input_query [token_num, hidden_dimension]
@@ -172,7 +173,7 @@ void GptContextAttentionLayer<T>::forward(TensorMap*                output_tenso
                                    stream_);
     sync_check_cuda_error();
 
-    const int max_seq_len = (int)(output_tensors->at("key_cache").shape[3]);  // max output seq length
+    const int max_seq_len_ = (int)(output_tensors->at("key_cache").shape[3]);  // max output seq length
     // Use batch major
     // put k/v_buf from shape [B, H, PL + L, Dh]
     // to cache [B, H, Dh/x, PL + L, x]  and [B, H, PL + L, Dh/x, x], PL denotes prompt length
@@ -182,7 +183,7 @@ void GptContextAttentionLayer<T>::forward(TensorMap*                output_tenso
                                 v_buf_2_,
                                 request_batch_size,
                                 max_prompt_length + request_seq_len,  // max input length + prefix prompt length
-                                max_seq_len,
+                                max_seq_len_,
                                 size_per_head_,
                                 local_head_num_,
                                 stream_);

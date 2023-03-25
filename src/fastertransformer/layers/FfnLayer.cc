@@ -296,15 +296,15 @@ void FfnLayer<T>::forward(TensorMap* output_tensors, TensorMap* input_tensors, c
         // to fuse GEMM + bias + activation, so we skip the activation function here. In all
         // other cases, we must apply the activation function separately.
         PUSH_RANGE("add bias act");
-        genericActivation(m,
-                          ffn_weights->intermediate_weight.bias,
-                          use_gated_activation ? ffn_weights->intermediate_weight2.bias : nullptr,
-                          input_tensors->at("ia3_tasks", {MEMORY_GPU, TYPE_INT32, {}, nullptr}).getPtr<const int>(),
-                          ffn_weights->ia3_weight.kernel,
-                          int8_mode_ == 2 ? ffn_weights->intermediate_weight.scale_out : (float*)nullptr,
-                          int8_mode_ == 2 ? ffn_weights->output_weight.scale : (float*)nullptr,
-                          input_tensors->getPtr<int>("padding_offset", nullptr),
-                          input_tensors->getVal<int>("seq_len", 1));
+        // genericActivation(m,
+        //                   ffn_weights->intermediate_weight.bias,
+        //                   use_gated_activation ? ffn_weights->intermediate_weight2.bias : nullptr,
+        //                   input_tensors->at("ia3_tasks", {MEMORY_GPU, TYPE_INT32, {}, nullptr}).getPtr<const int>(),
+        //                   ffn_weights->ia3_weight.kernel,
+        //                   int8_mode_ == 2 ? ffn_weights->intermediate_weight.scale_out : (float*)nullptr,
+        //                   int8_mode_ == 2 ? ffn_weights->output_weight.scale : (float*)nullptr,
+        //                   input_tensors->getPtr<int>("padding_offset", nullptr),
+        //                   input_tensors->getVal<int>("seq_len", 1));
         POP_RANGE;
     }
 
@@ -461,21 +461,21 @@ void FfnLayer<T>::allocateBuffer(size_t token_num, int moe_k, bool use_moe)
 {
     FT_LOG_DEBUG(__PRETTY_FUNCTION__);
     if (use_moe) {
-        moe_gates_buf_ =
-            (T*)allocator_->reMalloc(moe_gates_buf_, sizeof(T) * pad_to_multiple_of_16(token_num * expert_num_), false);
-        size_t ws_size_moe = 0;
-        if (int8_mode_ == 0) {
-            FT_CHECK_WITH_INFO(moe_fc_runner_.get() != NULL, "moe runner was not initialized.");
-            ws_size_moe = moe_fc_runner_->getWorkspaceSize(token_num, hidden_units_, inter_size_, expert_num_, moe_k);
-        }
-        else if (int8_mode_ == 1) {
-            FT_CHECK_WITH_INFO(moe_int8_weight_only_fc_runner_.get() != NULL,
-                               "weight only moe runner was not initialized.");
-            ws_size_moe = moe_int8_weight_only_fc_runner_->getWorkspaceSize(
-                token_num, hidden_units_, inter_size_, expert_num_, moe_k);
-        }
+        // moe_gates_buf_ =
+        //     (T*)allocator_->reMalloc(moe_gates_buf_, sizeof(T) * pad_to_multiple_of_16(token_num * expert_num_), false);
+        // size_t ws_size_moe = 0;
+        // if (int8_mode_ == 0) {
+        //     FT_CHECK_WITH_INFO(moe_fc_runner_.get() != NULL, "moe runner was not initialized.");
+        //     ws_size_moe = moe_fc_runner_->getWorkspaceSize(token_num, hidden_units_, inter_size_, expert_num_, moe_k);
+        // }
+        // else if (int8_mode_ == 1) {
+        //     FT_CHECK_WITH_INFO(moe_int8_weight_only_fc_runner_.get() != NULL,
+        //                        "weight only moe runner was not initialized.");
+        //     ws_size_moe = moe_int8_weight_only_fc_runner_->getWorkspaceSize(
+        //         token_num, hidden_units_, inter_size_, expert_num_, moe_k);
+        // }
 
-        moe_fc_workspace_ = (char*)allocator_->reMalloc(moe_fc_workspace_, sizeof(char) * ws_size_moe, false);
+        // moe_fc_workspace_ = (char*)allocator_->reMalloc(moe_fc_workspace_, sizeof(char) * ws_size_moe, false);
     }
     else {
         const auto type_size = int8_mode_ == 2 ? sizeof(int8_t) : sizeof(T);
@@ -512,8 +512,8 @@ void FfnLayer<T>::freeBuffer()
             allocator_->free((void**)(&inter_buf_2_));
         }
         if (expert_num_ != 0) {
-            allocator_->free((void**)(&moe_gates_buf_));
-            allocator_->free((void**)(&moe_fc_workspace_));
+            // allocator_->free((void**)(&moe_gates_buf_));
+            // allocator_->free((void**)(&moe_fc_workspace_));
         }
 
         if (mixed_gemm_workspace_) {

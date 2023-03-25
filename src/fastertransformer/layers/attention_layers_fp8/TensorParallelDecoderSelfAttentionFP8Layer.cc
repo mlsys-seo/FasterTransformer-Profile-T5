@@ -59,7 +59,8 @@ TensorParallelDecoderSelfAttentionFP8Layer<T1, T2>::TensorParallelDecoderSelfAtt
 template<typename T1, typename T2>
 void TensorParallelDecoderSelfAttentionFP8Layer<T1, T2>::forward(TensorMap*                 output_tensors,
                                                                  TensorMap*                 input_tensors,
-                                                                 const AttentionWeight<T1>* attention_weights)
+                                                                 const AttentionWeight<T1>* attention_weights,
+                                                                 const int max_seq_len)
 {
     // input tensors:
     //      attention_input [batch_size, hidden_dimension],

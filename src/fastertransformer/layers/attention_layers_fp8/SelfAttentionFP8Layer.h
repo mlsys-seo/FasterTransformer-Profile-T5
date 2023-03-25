@@ -78,7 +78,7 @@ public:
 
     void forward(TensorMap*                        output_tensors,
                  TensorMap*                        input_tensors,
-                 const AttentionFP8Weight<T1, T2>* attention_weights) override;
+                 const AttentionFP8Weight<T1, T2>* attention_weights, const int max_seq_len=0) override;
 };
 
 }  // namespace fastertransformer

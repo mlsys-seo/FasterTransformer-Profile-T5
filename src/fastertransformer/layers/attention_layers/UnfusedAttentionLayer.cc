@@ -22,7 +22,8 @@ namespace fastertransformer {
 template<typename T>
 void UnfusedAttentionLayer<T>::forward(TensorMap*                output_tensors,
                                        TensorMap*                input_tensors,
-                                       const AttentionWeight<T>* attention_weights)
+                                       const AttentionWeight<T>* attention_weights,
+                                       const int max_seq_len)
 {
     // input_tensors:
     //      input_query [token_num, d_model],
@@ -90,6 +91,7 @@ void UnfusedAttentionLayer<T>::forward(TensorMap*                output_tensors,
             // Note: Here, we assume the weights of each time may be different.
             // If we can preprocess these weights before inference, we can reduce the overhead
             // caused by cudaMemcpyAsync
+            
             cudaMemcpyAsync((void*)batch_qkv_kernel_ptr_, hA, sizeof(T*) * 12, cudaMemcpyHostToDevice, stream_);
             cublas_wrapper_->batchedGemm(CUBLAS_OP_N,
                                          CUBLAS_OP_N,
@@ -403,9 +405,9 @@ void UnfusedAttentionLayer<T>::allocateBuffer(size_t batch_size, size_t seq_len)
     qk_buf_    = (T*)allocator_->reMalloc(qk_buf_, sizeof(T) * batch_size * head_num_ * seq_len * seq_len, false);
     qkv_buf_   = (T*)allocator_->reMalloc(qkv_buf_, sizeof(T) * batch_size * seq_len * hidden_units_, false);
     qkv_buf_2_ = (T*)allocator_->reMalloc(qkv_buf_2_, sizeof(T) * batch_size * seq_len * hidden_units_, false);
-    batch_qkv_kernel_ptr_ = (T**)allocator_->reMalloc(batch_qkv_kernel_ptr_, sizeof(T*) * 12, false);
-    batch_qkv_input_ptr_  = batch_qkv_kernel_ptr_ + 4;
-    batch_qkv_buf_ptr_    = batch_qkv_input_ptr_ + 4;
+    // batch_qkv_kernel_ptr_ = (T**)allocator_->reMalloc(batch_qkv_kernel_ptr_, sizeof(T*) * 12, false);
+    // batch_qkv_input_ptr_  = batch_qkv_kernel_ptr_ + 4;
+    // batch_qkv_buf_ptr_    = batch_qkv_input_ptr_ + 4;
     is_allocate_buffer_   = true;
 }
 
@@ -421,7 +423,7 @@ void UnfusedAttentionLayer<T>::freeBuffer()
         allocator_->free((void**)(&qk_buf_));
         allocator_->free((void**)(&qkv_buf_));
         allocator_->free((void**)(&qkv_buf_2_));
-        allocator_->free((void**)(&batch_qkv_kernel_ptr_));
+        // allocator_->free((void**)(&batch_qkv_kernel_ptr_));
         sync_check_cuda_error();
         is_allocate_buffer_ = false;
     }

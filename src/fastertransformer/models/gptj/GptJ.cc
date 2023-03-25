@@ -151,7 +151,10 @@ void GptJ<T>::allocateBuffer(
         context_decoder_output_buf_, sizeof(T) * batchxbeam * max_input_len * hidden_units_, false));
     output_log_probs_buf_ =
         (float*)(allocator_->reMalloc(output_log_probs_buf_, sizeof(float) * batchxbeam * max_seq_len, false));
-    generation_should_stop_ = (bool*)(allocator_->reMalloc(generation_should_stop_, sizeof(bool), true, true));
+
+    if (generation_should_stop_ == nullptr) {
+        cudaMallocHost(&generation_should_stop_, 1 * sizeof(bool));
+    }
 
     is_allocate_buffer_ = true;
 }
@@ -203,7 +206,7 @@ void GptJ<T>::freeBuffer()
         allocator_->free((void**)(&context_decoder_output_buf_));
         allocator_->free((void**)(&output_log_probs_buf_));
 
-        allocator_->free((void**)(&generation_should_stop_), true);
+        cudaFreeHost(generation_should_stop_);
 
         is_allocate_buffer_ = false;
     }

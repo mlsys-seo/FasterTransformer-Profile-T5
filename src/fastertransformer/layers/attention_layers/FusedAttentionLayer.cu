@@ -71,7 +71,8 @@ void FusedAttentionLayer<T>::invokeTrtAddQkvBias(size_t token_num, const Attenti
 template<typename T>
 void FusedAttentionLayer<T>::forward(TensorMap*                output_tensors,
                                      TensorMap*                input_tensors,
-                                     const AttentionWeight<T>* attention_weights)
+                                     const AttentionWeight<T>* attention_weights,
+                                     const int max_seq_len)
 {
     // input_tensors: [input_query (h_token_num, d_model),
     //                 attention_mask (batch, 1, seqlen, seqlen),

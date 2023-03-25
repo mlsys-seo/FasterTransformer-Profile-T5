@@ -67,7 +67,8 @@ void WenetDecoderPlugin::CreateFT()
 #endif
 
     // Wenet DecoderWeight
-    std::string weightFilePath = m_.weightFilePath;
+    std::string weightFilePath = "/weight/dec/";
+    // std::string weightFilePath = m_.weightFilePath;
     FT_LOG_WARNING("The default weight file path is %s. Change it accordingly, otherwise model will fail to load! \n",
                    weightFilePath.c_str());
     if (m_.useFP16) {

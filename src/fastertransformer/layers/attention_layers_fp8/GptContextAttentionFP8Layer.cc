@@ -23,7 +23,8 @@ namespace fastertransformer {
 template<typename T1, typename T2>
 void GptContextAttentionFP8Layer<T1, T2>::forward(TensorMap*                 output_tensors,
                                                   TensorMap*                 input_tensors,
-                                                  const AttentionWeight<T1>* attention_weights)
+                                                  const AttentionWeight<T1>* attention_weights,
+                                                  const int max_seq_len)
 {
     // input_tensors:
     //      input_query [batch_size * seq_len, hidden_dimension]

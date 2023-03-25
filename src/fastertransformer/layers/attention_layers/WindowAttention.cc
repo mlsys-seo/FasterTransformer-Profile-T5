@@ -115,7 +115,8 @@ WindowAttention<T>::~WindowAttention()
 template<typename T>
 void WindowAttention<T>::forward(TensorMap*                output_tensors,
                                  TensorMap*                input_tensors,
-                                 const AttentionWeight<T>* attention_weights)
+                                 const AttentionWeight<T>* attention_weights,
+                                 const int max_seq_len)
 {
     // input_tensors:
     //      input [batch * window_num * window_len, dim]

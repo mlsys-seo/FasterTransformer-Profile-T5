@@ -131,11 +131,6 @@ protected:
     const bool     using_beam_hyps = true;
     BeamHypotheses beam_hyps_;
 
-    // function pointer callback
-    using callback_sig                 = void(TensorMap*, void*);
-    callback_sig* token_generated_cb_  = nullptr;
-    void*         token_generated_ctx_ = nullptr;
-
 public:
     T5Decoding(size_t                              max_batch_size,
                size_t                              max_seq_len,
@@ -180,21 +175,17 @@ public:
 
     void forward(std::vector<Tensor>*       output_tensors,
                  const std::vector<Tensor>* input_tensors,
-                 const T5DecodingWeight<T>* Decoding_weights);
+                 const T5DecodingWeight<T>* Decoding_weights,
+                 const int                  profile_iters=0);
 
     void forward(std::unordered_map<std::string, Tensor>*       output_tensors,
                  const std::unordered_map<std::string, Tensor>* input_tensors,
-                 const T5DecodingWeight<T>*                     Decoding_weights);
+                 const T5DecodingWeight<T>*                     Decoding_weights, 
+                 const int                                      profile_iters=0);
 
-    void forward(TensorMap* output_tensors, TensorMap* input_tensors, const T5DecodingWeight<T>* Decoding_weights);
+    void forward(TensorMap* output_tensors, TensorMap* input_tensors, const T5DecodingWeight<T>* Decoding_weights, const int profile_iters=0);
 
     void setStream(cudaStream_t stream) override;
-
-    void registerCallback(callback_sig* fn, void* ctx);
-    void unRegisterCallback();
-
-    void setOutputTensors(TensorMap* output_tensors, const TensorMap* input_tensors);
-    void sendTensorsToFirstPipelineNode(TensorMap* output_tensors, const TensorMap* input_tensors);
 };
 
 }  // namespace fastertransformer

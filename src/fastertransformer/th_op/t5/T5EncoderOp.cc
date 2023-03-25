@@ -204,8 +204,10 @@ void FTT5Encoder<T>::forward(size_t                   batch_size,
                              th::Tensor&              sequence_lengths,
                              th::optional<th::Tensor> inputs_embeds,
                              th::Tensor&              output,
-                             bool                     removing_padding)
+                             bool                     removing_padding,
+                             th::optional<int64_t>    profile_iters_opt)
 {
+    int profile_iters = profile_iters_opt.has_value() ? (int)profile_iters_opt.value() : 0;
     FT_LOG_DEBUG(__PRETTY_FUNCTION__);
     auto           stream        = at::cuda::getCurrentCUDAStream().stream();
     cublasHandle_t _cublasHandle = at::cuda::getCurrentCUDABlasHandle();
@@ -289,7 +291,7 @@ void FTT5Encoder<T>::forward(size_t                   batch_size,
     ft::TensorMap output_tensors({{"output_hidden_state", convert_tensor<T>(output)}});
 
     try {
-        t5_encoder->forward(&output_tensors, &input_tensors, &t5_encoder_weights);
+        t5_encoder->forward(&output_tensors, &input_tensors, &t5_encoder_weights, profile_iters);
     }
     catch (std::runtime_error& error) {
         std::cout << error.what();
@@ -508,7 +510,8 @@ FasterTransformerT5Encoder::~FasterTransformerT5Encoder()
 
 th::Tensor FasterTransformerT5Encoder::forward(th::optional<th::Tensor> input_ids,
                                                th::Tensor               sequence_lengths,
-                                               th::optional<th::Tensor> inputs_embeds)
+                                               th::optional<th::Tensor> inputs_embeds,
+                                               th::optional<int64_t>    profile_iters_opt)
 {
     if (input_ids.has_value()) {
         CHECK_CONTIGUOUS(input_ids.value());
@@ -534,7 +537,7 @@ th::Tensor FasterTransformerT5Encoder::forward(th::optional<th::Tensor> input_id
 
     auto output = torch::empty({(long int)batch_size, (long int)seq_len, (long int)d_model},
                                torch::dtype(_st).device(torch::kCUDA).requires_grad(false));
-    ft_t5_encoder->forward(batch_size, seq_len, input_ids, sequence_lengths, inputs_embeds, output, _remove_padding);
+    ft_t5_encoder->forward(batch_size, seq_len, input_ids, sequence_lengths, inputs_embeds, output, _remove_padding, profile_iters_opt);
     return output;
 }
 

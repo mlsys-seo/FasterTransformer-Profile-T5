@@ -43,7 +43,8 @@ public:
                                             th::optional<bool>       is_return_cum_log_probs_opt,
                                             th::optional<bool>       is_return_cross_attentions_opt,
                                             th::optional<th::Tensor> bad_words_list,
-                                            th::optional<th::Tensor> stop_words_list) = 0;
+                                            th::optional<th::Tensor> stop_words_list,
+                                            th::optional<int64_t>    profile_iters_opt) = 0;
 };
 
 template<typename T>
@@ -100,7 +101,8 @@ public:
                                     th::optional<bool>       is_return_cum_log_probs_opt,
                                     th::optional<bool>       is_return_cross_attentions_opt,
                                     th::optional<th::Tensor> bad_words_list_opt,
-                                    th::optional<th::Tensor> stop_words_list_opt) override;
+                                    th::optional<th::Tensor> stop_words_list_opt,
+                                    th::optional<int64_t>    profile_iters_opt) override;
 
 private:
     const int64_t                   head_num_;
@@ -221,7 +223,8 @@ public:
                                     th::optional<bool>       is_return_cum_log_probs,
                                     th::optional<bool>       is_return_cross_attentions,
                                     th::optional<th::Tensor> bad_words_list,
-                                    th::optional<th::Tensor> stop_words_list);
+                                    th::optional<th::Tensor> stop_words_list,
+                                    th::optional<int64_t>    profile_iters_opt);
 
     std::vector<th::Tensor> get_pickle_info() const;
 

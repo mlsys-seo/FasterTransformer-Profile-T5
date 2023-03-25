@@ -232,7 +232,8 @@ DecoderSelfAttentionFP8Layer<T1, T2>::~DecoderSelfAttentionFP8Layer()
 template<typename T1, typename T2>
 void DecoderSelfAttentionFP8Layer<T1, T2>::forward(TensorMap*                 output_tensors,
                                                    TensorMap*                 input_tensors,
-                                                   const AttentionWeight<T1>* attention_weights)
+                                                   const AttentionWeight<T1>* attention_weights,
+                                                   const int max_seq_len)
 {
     // input tensors:
     //      attention_input [batch_size, d_model_],
