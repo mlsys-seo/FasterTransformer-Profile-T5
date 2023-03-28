@@ -1,0 +1,6 @@
+## v100 70
+## a40  86
+## 3090 86
+
+cmake -DSM=xx -DCMAKE_BUILD_TYPE=Release -DBUILD_PYT=ON -DBUILD_MULTI_GPU=ON
+make -j 12

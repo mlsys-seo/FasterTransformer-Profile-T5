@@ -865,13 +865,13 @@ void T5Decoding<T>::forward(TensorMap*                 output_tensors,
         }
 
         cudaD2Hcpy(h_finished_buf_, finished_buf_, batch_size * beam_width);
-        uint sum = 0;
-        for (uint i = 0; i < batch_size * beam_width; i++) {
-            sum += (int)h_finished_buf_[i];
-        }
-        if (sum == batch_size * beam_width) {
-            break;
-        }
+        // uint sum = 0;
+        // for (uint i = 0; i < batch_size * beam_width; i++) {
+        //     sum += (int)h_finished_buf_[i];
+        // }
+        // if (sum == batch_size * beam_width) {
+        //     break;
+        // }
     }
 
     if (pipeline_para_.rank_ == pipeline_para_.world_size_ - 1) {
